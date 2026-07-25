@@ -63,9 +63,10 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: stable
+          override: ${{ env.RUST_VERSION }}
 
       - name: Check rust-toolchain.toml
         working-directory: ${{ env.APK_BUILD_DIR }}/packages/localsend_isolates
@@ -106,9 +107,10 @@ jobs:
           channel: "stable"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: stable
+          override: ${{ env.RUST_VERSION }}
 
       - name: Check rust-toolchain.toml
         working-directory: packages/localsend_isolates
@@ -184,9 +186,10 @@ jobs:
           channel: "stable"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: stable
+          override: ${{ env.RUST_VERSION }}
 
       - name: Check rust-toolchain.toml
         working-directory: packages/localsend_isolates
@@ -283,9 +286,10 @@ jobs:
           channel: "stable"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: stable
+          override: ${{ env.RUST_VERSION }}
 
       - name: Check rust-toolchain.toml
         working-directory: packages/localsend_isolates
@@ -343,40 +347,9 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
       - name: Dependencies
         working-directory: app
         run: flutter pub get
-
-      # WORKAROUND: on Windows, cargokit's build_tool resolves the rust crate's
-      # relative path (encoded in packages/localsend_isolates/rust_builder/windows/CMakeLists.txt)
-      # against the *apparent* symlinked plugin path Flutter creates at
-      # app/windows/flutter/ephemeral/.plugin_symlinks/rust_lib_localsend_app/windows/,
-      # not the real physical crate location. On Windows this always collapses
-      # (via plain textual ".." folding, which does not follow junctions/symlinks)
-      # to "app/rust", regardless of where the crate actually lives. Instead of
-      # fighting that, we create a junction at exactly that spot pointing at the
-      # real crate directory, found dynamically so this keeps working even if the
-      # crate gets moved around.
-      - name: Workaround cargokit Windows symlink path resolution
-        shell: pwsh
-        run: |
-          $rustDir = Get-ChildItem -Path packages\localsend_isolates -Recurse -Directory -Filter "rust" |
-            Where-Object { Test-Path (Join-Path $_.FullName "Cargo.toml") } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $rustDir) {
-            Write-Error "Could not locate the rust crate (a 'rust' folder containing Cargo.toml) under packages/localsend_isolates"
-            exit 1
-          }
-          Write-Host "Found rust crate at: $rustDir"
-          if (-not (Test-Path "app\rust")) {
-            New-Item -ItemType Junction -Path "app\rust" -Target $rustDir | Out-Null
-          }
-          Get-Item "app\rust" | Select-Object FullName, LinkType, Target
 
       - name: Compile for Windows
         working-directory: app
@@ -403,77 +376,6 @@ jobs:
           name: windows-zip-x86-64-result
           path: app/LocalSend.zip
 
-  # Uses GitHub's native Windows ARM64 hosted runner (public preview, free for public repos).
-  build_windows_zip_arm64:
-    needs: build
-    runs-on: windows-11-arm
-
-    steps:
-      - name: Fix long file paths
-        run: git config --system core.longpaths true
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Check rust-toolchain.toml
-        working-directory: packages/localsend_isolates
-        run: rustup show
-
-      - name: Dependencies
-        working-directory: app
-        run: flutter pub get
-
-      # Same workaround as the x64 job above - see the comment there.
-      - name: Workaround cargokit Windows symlink path resolution
-        shell: pwsh
-        run: |
-          $rustDir = Get-ChildItem -Path packages\localsend_isolates -Recurse -Directory -Filter "rust" |
-            Where-Object { Test-Path (Join-Path $_.FullName "Cargo.toml") } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $rustDir) {
-            Write-Error "Could not locate the rust crate (a 'rust' folder containing Cargo.toml) under packages/localsend_isolates"
-            exit 1
-          }
-          Write-Host "Found rust crate at: $rustDir"
-          if (-not (Test-Path "app\rust")) {
-            New-Item -ItemType Junction -Path "app\rust" -Target $rustDir | Out-Null
-          }
-          Get-Item "app\rust" | Select-Object FullName, LinkType, Target
-
-      - name: Compile for Windows ARM64
-        working-directory: app
-        run: flutter build windows
-
-      - name: Create empty settings.json
-        working-directory: app
-        run: echo {} > build/windows/arm64/runner/Release/settings.json
-
-      - name: Add DLL files
-        working-directory: app
-        run: |
-          Copy-Item ../support/build/windows/arm64/msvcp140.dll build/windows/arm64/runner/Release/
-          Copy-Item ../support/build/windows/arm64/vcruntime140.dll build/windows/arm64/runner/Release/
-
-      - name: Zip compiled files
-        working-directory: app
-        run: Compress-Archive -Path build/windows/arm64/runner/Release/* -DestinationPath LocalSend-arm64.zip
-
-      - name: Upload zip
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-zip-arm64-result
-          path: app/LocalSend-arm64.zip
-
   release:
     needs:
       - build
@@ -484,7 +386,6 @@ jobs:
       - build_deb_arm_64
       - build_appimage_x86_64
       - build_windows_zip_x86_64
-      - build_windows_zip_arm64
     runs-on: ubuntu-24.04
 
     steps:
@@ -671,24 +572,4 @@ jobs:
           upload_url: ${{ steps.draft_release.outputs.upload_url }}
           asset_path: result.zip
           asset_name: LocalSend-${{ needs.build.outputs.version }}-windows-x86-64.zip
-          asset_content_type: application/zip
-
-      # WINDOWS ZIP (arm64)
-      - name: Download windows arm64 zip file
-        uses: actions/download-artifact@v7
-        with:
-          name: windows-zip-arm64-result
-          path: windows-zip-arm64-result
-
-      - name: Copy zip file to root
-        run: cp windows-zip-arm64-result/*.zip result-arm64.zip
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.draft_release.outputs.upload_url }}
-          asset_path: result-arm64.zip
-          asset_name: LocalSend-${{ needs.build.outputs.version }}-windows-arm64.zip
           asset_content_type: application/zip
